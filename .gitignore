@@ -1,0 +1,6 @@
+# intermediate output
+*.o
+*.nb.html
+*.html
+*.zip
+.Rproj.user
