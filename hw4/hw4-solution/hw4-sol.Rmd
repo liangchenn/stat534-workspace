@@ -1,0 +1,754 @@
+---
+title: "Stat534 HW4"
+output:
+  pdf_document: default
+  html_notebook:
+    theme: bootstrap
+    highlight: tango
+---
+
+# Packages
+```{r}
+library(data.table)
+library(MASS)
+library(snow)
+```
+
+# Data
+
+```{r}
+df <- fread("534binarydata.txt")
+```
+
+
+# Problem 1
+
+## Part A: Solution
+
+```{r}
+# Problem 1 -----------------------------------------------------------------------------------
+
+#' Goal: function computing the Lapalace approximation of the marginal likelihood
+#' Setup: univariate logistic regression model
+
+
+getLaplaceApprox <- function(response, explanatory, data, betaMode) {
+    
+    # data
+    xy <- get_xy(response, explanatory, data)
+    y <- xy$y
+    x <- xy$x
+    
+    # hessian
+    hess_mode <- get_post_hessian(x=x, y=y, betas=betaMode)
+    neg_hess <- -hess_mode
+    
+    # log deteriminant
+    log_det <- as.numeric(
+        determinant(neg_hess, logarithm = TRUE)$modulus
+    )
+    
+    log_marginal_lik <- log(2 * pi) + post_loglik(x=x, y=y, betas=betaMode) - 0.5 * log_det
+    
+    return(log_marginal_lik)
+}
+
+# Helpers -------------------------------------------------------------------------------------
+
+# 1. get proper data (X, y)
+get_xy <- function(response, explanatory, data) {
+    m <- as.matrix(data)
+    return(list(
+        x=m[, explanatory],
+        y=m[, response]
+    ))
+}
+
+
+# 2. log-likelihood functions
+
+log1pexp <- function(x) {
+    # if (x > 0) {
+    #     return(x + log1p(exp(-x)))
+    # }
+    # return(log1p(exp(x)))
+    #NOTE: need to vectorize func, above is not
+    ifelse(x > 0, x + log1p(exp(-x)), log1p(exp(x)))
+}
+
+
+post_loglik <- function(x, y, betas) {
+    
+    beta0 <- betas[1]
+    beta1 <- betas[2]
+    
+    temp <- beta0 + beta1 * x
+    
+    loglik <- sum(y * temp - log1pexp(temp))
+    log_prior <- -log(2 * pi) - 0.5 * sum(betas**2)
+    log_post <- log_prior + loglik
+    
+    return(log_post)
+}
+
+get_post_gradient <- function(x, y, betas) {
+    
+    beta0 <- betas[1]
+    beta1 <- betas[2]
+    
+    temp <- beta0 + beta1 * x
+    pi_ <- plogis(temp)
+    
+    grad0 <- sum(y - pi_) - beta0
+    grad1 <- sum((y - pi_) * x) - beta1
+    
+    return(c(grad0, grad1))
+}
+
+get_post_hessian <- function(x, y, betas) {
+    
+    beta0 <- betas[1]
+    beta1 <- betas[2]
+    
+    temp <- beta0 + beta1 * x
+    pi_ <- plogis(temp)
+    w <- pi_ * (1 - pi_)
+    
+    h00 <- -sum(w) - 1
+    h01 <- -sum(w * x)
+    h11 <- -sum(w * x^2) - 1
+    
+    hess <- matrix(c(h00, h01,
+             h01, h11), nrow = 2, byrow = TRUE)
+    
+    return(hess)
+}
+```
+
+
+```{r}
+getLaplaceApprox(ncol(df), 1, data = df, betaMode = c(0, 0))
+```
+
+
+
+## Part B: AI Solution
+
+### Prompt
+
+I need you to design a function in R that computes the Laplace approximation of the marginal likelihood associated with a univariate logistic regression.
+The function should be designed as follow
+
+"""getLaplaceApprox <- function(response, explanatory, data, betaMode)"""
+
+where the inputs are:
+response: integer - column index corresponding to the response variable,
+explanatory: integer- column index corresponding to an explanatory variable (note we are in an univariate model),
+data: data frame or matrix - contains all the variables,
+betaMode: vector - mode of the posterior distribution from Newton-Raphson.
+Your function should return a number.
+REMEBER for prior $\pi$, please use `pi_` as the variable name to avoid using built-in pi constant.
+
+### Code
+
+```{r}
+# Problem 1 -----------------------------------------------------------------------------------
+
+AI_getLaplaceApprox <- function(response, explanatory, data, betaMode) {
+    # Extract variables
+    y <- data[, response]
+    x <- data[, explanatory]
+    n <- length(y)
+    
+    b0 <- betaMode[1]
+    b1 <- betaMode[2]
+    
+    # Calculate pi_i (inverse logit) [cite: 15, 21]
+    # Using pi_ to avoid conflict with R's built-in pi [user request]
+    linear_pred <- b0 + b1 * x
+    pi_ <- exp(linear_pred) / (1 + exp(linear_pred))
+    
+    # Calculate log-likelihood l(beta|D) [cite: 25]
+    # We use a small epsilon to avoid log(0)
+    eps <- 1e-16
+    log_lik <- sum(y * log(pi_ + eps) + (1 - y) * log(1 - pi_ + eps))
+    
+    # Calculate l*(beta) 
+    # l*(beta) = -log(2*pi) - 0.5*(beta0^2 + beta1^2) + l(beta|D)
+    l_star <- -log(2 * base::pi) - 0.5 * (b0^2 + b1^2) + log_lik
+    
+    # Calculate the Hessian matrix D^2 l*(beta) [cite: 38, 39]
+    # From log-likelihood derivatives[cite: 26], the second derivatives are:
+    # d2l/db0^2 = -sum(pi * (1-pi))
+    # d2l/db0db1 = -sum(x * pi * (1-pi))
+    # d2l/db1^2 = -sum(x^2 * pi * (1-pi))
+    # The prior adds -1 to the diagonal elements of the Hessian
+    
+    weight <- pi_ * (1 - pi_)
+    h00 <- -sum(weight) - 1
+    h01 <- -sum(x * weight)
+    h11 <- -sum(x^2 * weight) - 1
+    
+    hessian <- matrix(c(h00, h01, h01, h11), nrow = 2)
+    
+    # Calculate log marginal likelihood [cite: 52, 55]
+    # log(2*pi) + l_star - 0.5 * log(det(-Hessian))
+    det_neg_hessian <- det(-hessian)
+    log_marg_lik <- log(2 * base::pi) + l_star - 0.5 * log(det_neg_hessian)
+    
+    return(log_marg_lik)
+}
+```
+
+
+## Part C: Comparison
+
+```{r}
+test_idx <- sample(1:(ncol(df) - 1), size = 1)
+
+getLaplaceApprox(ncol(df), test_idx, data = df, betaMode = c(0, 0))
+
+AI_getLaplaceApprox(ncol(df), test_idx, data = as.matrix(df), betaMode = c(0, 0))
+```
+
+
+- The AI solution and my solution implement the same Laplace approximation logic (following same instructions). Both compute the posterior mode, evaluate the log posterior at that mode, compute the Hessian of the log posterior, and use the determinant of the negative Hessian in the approximation.
+
+- The AI code is correct for this problem. I randomly checked the predictors in `534binarydata.txt`. The Laplace log marginal likelihoods are equal.
+
+- My solution is more modular with helper functions such as `get_xy()`, `post_loglik()`. The AI solution repeats some calc. directly inside the function, which makes the function self-contained but have duplicated code.
+
+- Regarding the stability. I use `plogis()` and the stable expression `log1pexp(eta)` for the logistic log likelihood. The AI code computes `exp(eta) / (1 + exp(eta))` and then adds a small epsilon inside `log()`, which works on this data set but is less reliable for very large positive or negative linear predictors.
+
+- Both implementations use the same data structures: numeric vectors for `x`, `y`, and `betaMode`, and a `2 x 2` numeric matrix for the Hessian. The algorithmic complexity is essentially the same.
+
+
+\clearpage
+
+# Problem 2
+## Part A: Solution
+
+```{r}
+# Problem 2 -----------------------------------------------------------------------------------
+
+#' Goal: estimate coefficients betas with Metropolis-Hasting Sampling
+
+getPosteriorMeans <- function(response, explanatory, data, betaMode, niter) {
+    
+    # data
+    xy <- get_xy(response, explanatory, data)
+    y <- xy$y
+    x <- xy$x
+    
+    # setups
+    hess_mode <- get_post_hessian(x, y, betas=betaMode)
+    proposal_cov <- -solve(hess_mode)
+    
+    beta_chain <- matrix(NA_real_, nrow = niter, ncol = length(betaMode))
+    colnames(beta_chain) <- paste0("beta", (1:length(betaMode))-1)
+    
+    # initialization
+    beta_curr <- betaMode
+    logpost_curr <- post_loglik(x=x, y=y, betas=beta_curr)
+    
+    # main sampling
+    for (iter in 1:niter) {
+        # sample proposal dist.
+        beta_prop <- as.numeric(MASS::mvrnorm(
+            n = 1,
+            mu = beta_curr,
+            Sigma = proposal_cov
+        ))
+        
+        logpost_prop <- post_loglik(x, y, betas=beta_prop)
+        log_accept_prob <- (logpost_prop - logpost_curr)
+        
+        if (log(runif(1)) <= log_accept_prob) {
+            # case: accept w/ prob.
+            beta_curr <- beta_prop
+            logpost_curr <- logpost_prop
+        }
+        # case: reject
+        beta_chain[iter, ] <- beta_curr
+    }
+    
+    return(beta_chain)
+}
+
+```
+
+The $(\beta_0, \beta_1)$ from Metropolis-Hasting is $(-0.7570194, 1.0153382)$.
+
+```{r}
+beta_chain <- getPosteriorMeans(
+    response = ncol(df),
+    explanatory = 1,
+    data = df,
+    betaMode = c(0, 0),
+    niter = 10000
+)
+colMeans(beta_chain)
+```
+
+
+## Part B: AI Solution
+
+### Prompt
+
+Write a function in R that estimates the coefs beta0 and beta1 of the univariate logistic
+regression (1) as follows:
+1. Use the Metropolis-Hastings algorithm to simulate 10000 samples
+2. The esetimates for beta0 and beta1 are given by the sample means
+
+you will write a function getPosteriorMeans as follows:
+getPosteriorMeans <- function(response,explanatory,data, betaMode, niter)
+where the inputs are:
+response: integer - column index corresponding to the response variable,
+explanatory: integer- column index corresponding to an explanatory variable (note we are in an univariate model),
+data: data frame or matrix - contains all the variables,
+betaMode: vector - mode of the posterior distribution from Newton-Raphson,
+niter: number of iterations for Metropolis-Hastings.
+Your function should return a matrix or a vector of Beta values.
+
+### Code
+
+```{r}
+# Problem 2 -----------------------------------------------------------------------------------
+
+AI_getPosteriorMeans <- function(response, explanatory, data, betaMode, niter) {
+   
+    # Extract data [cite: 7]
+    y <- data[, response]
+    x <- data[, explanatory]
+    
+    # 1. Setup the Proposal Covariance Matrix [cite: 65]
+    # We need the Hessian at the mode to define the proposal distribution
+    b0_mode <- betaMode[1]
+    b1_mode <- betaMode[2]
+    
+    # Calculate pi_i at the mode [cite: 15, 21]
+    lin_pred_mode <- b0_mode + b1_mode * x
+    pi_mode <- exp(lin_pred_mode) / (1 + exp(lin_pred_mode))
+    
+    # Compute Hessian D^2 l*(beta) at the mode [cite: 39]
+    weight_mode <- pi_mode * (1 - pi_mode)
+    h00 <- -sum(weight_mode) - 1
+    h01 <- -sum(x * weight_mode)
+    h11 <- -sum(x^2 * weight_mode) - 1
+    hessian_mode <- matrix(c(h00, h01, h01, h11), nrow = 2)
+    
+    # Proposal covariance is the negative inverse of the Hessian [cite: 65]
+    prop_sigma <- solve(-hessian_mode)
+    
+    # 2. Define the l*(beta) function for log-posterior density [cite: 32]
+    get_l_star <- function(beta_vec) {
+        b0 <- beta_vec[1]
+        b1 <- beta_vec[2]
+        
+        lp <- b0 + b1 * x
+        # Using pi_ to avoid built-in pi constant [user instruction]
+        pi_ <- exp(lp) / (1 + exp(lp))
+        
+        # Log-likelihood [cite: 25]
+        # Add small epsilon to avoid log(0)
+        log_lik <- sum(y * log(pi_ + 1e-16) + (1 - y) * log(1 - pi_ + 1e-16))
+        
+        # Return l*(beta) [cite: 32]
+        return(-log(2 * base::pi) - 0.5 * (b0^2 + b1^2) + log_lik)
+    }
+    
+    # 3. Metropolis-Hastings Algorithm [cite: 57, 75]
+    # Initialize storage and starting values [cite: 58, 94]
+    samples <- matrix(0, nrow = niter, ncol = 2)
+    samples[1, ] <- betaMode
+    current_l_star <- get_l_star(betaMode)
+    
+    for (k in 2:niter) {
+        # Generate candidate from bivariate normal [cite: 62, 63]
+        candidate <- MASS::mvrnorm(n = 1, mu = samples[k - 1, ], Sigma = prop_sigma)
+        candidate_l_star <- get_l_star(candidate)
+        
+        # Calculate log acceptance probability [cite: 70, 82]
+        log_alpha <- candidate_l_star - current_l_star
+        
+        # Acceptance step [cite: 78, 81, 84, 86]
+        if (log(runif(1)) <= log_alpha) {
+            samples[k, ] <- candidate
+            current_l_star <- candidate_l_star
+        } else {
+            samples[k, ] <- samples[k - 1, ]
+        }
+    }
+    
+    # 4. Calculate posterior means 
+    beta0_mean <- mean(samples[, 1])
+    beta1_mean <- mean(samples[, 2])
+    
+    return(c(beta0 = beta0_mean, beta1 = beta1_mean))
+}
+
+```
+
+
+## Part C: Comparison
+
+```{r}
+colMeans(beta_chain)
+```
+
+```{r}
+AI_beta_chain <- AI_getPosteriorMeans(
+    response = ncol(df),
+    explanatory = 1,
+    data = as.matrix(df),
+    betaMode = c(0, 0),
+    niter = 10000
+)
+AI_beta_chain
+```
+
+
+- The AI solution uses the same Metropolis-Hastings algo. as my solution. Both have proposal distribution, proposal covariance, and an acceptance probability based on the log posterior difference.
+
+- The AI code is the same as my solution with negliable differences. (<0.1)
+
+- The main output difference is the return value. My `getPosteriorMeans()` returns the full Markov chain, and the posterior means are computed later. The AI function returns only a length-2 vector of posterior means. The AI's output does not specifically follow the requirements.
+
+- Both solutions use a numeric matrix to store sampled beta values, a numeric vector for each proposed candidate, and a `2 x 2` matrix for the proposal covariance. The algorithms are the same Metropolis-Hastings algorithm, except that the AI chain stores `betaMode` as the first row and then runs from iteration 2, while my code records a state after each proposal step.
+
+\clearpage
+# Problem 3
+## Part A: Solution
+
+I redesgined the main function output, since the original one is bad for later use and check.
+
+```{r}
+# Problem 3 -----------------------------------------------------------------------------------
+
+#' Goal: bayes logistic model with 1 variable, 1 outcome
+
+bayesLogistic <- function(apredictor, response, data, NumberOfIterations) {
+    
+    # get beta mode
+    betaMode <- get_betas_mode_NR(
+        response = response,
+        explanatory = apredictor,
+        data = data
+    )
+    
+    # calc. loglik
+    log_marginal_lik <- getLaplaceApprox(
+        response = response,
+        explanatory = apredictor,
+        data = data,
+        betaMode = betaMode
+    )
+    
+    # chain
+    beta_chain <- getPosteriorMeans(
+        response = response,
+        explanatory = apredictor,
+        data = data,
+        betaMode = betaMode,
+        niter = NumberOfIterations
+    )
+    beta_bayes <- colMeans(beta_chain)
+    
+    # mle
+    dat_mat <- as.matrix(data)
+    y <- dat_mat[, response]
+    x <- dat_mat[, apredictor]
+    mle_fit <- glm(y ~ x, family = binomial())
+    mle_coef <- coef(mle_fit)
+    
+    # results
+    res <- list(
+        apredictor=apredictor,
+        logmarglik=log_marginal_lik,
+        beta0bayes=unname(beta_bayes[1]),
+        beta1bayes=unname(beta_bayes[2]),
+        beta0mle=unname(mle_coef[1]),
+        beta1mle=unname(mle_coef[2])
+    )
+    
+    return(res)   
+}
+
+
+# Algo: Newton-Ralphson -----------------------------------------------------------------------
+
+get_betas_mode_NR <- function(
+        response, explanatory, data, 
+        tol=1e-4, max_iter=100, verbose=FALSE
+    ) {
+    
+    # get data
+    xy <- get_xy(response, explanatory, data)
+    x <- xy$x
+    y <- xy$y
+    
+    # initialization
+    betas <- c(0, 0)
+    
+    # main
+    for (iter in 1:max_iter) {
+        grad <- get_post_gradient(x=x, y=y, betas=betas)
+        hess <- get_post_hessian(x=x, y=y, betas=betas)
+        
+        betas_new <- betas - solve(hess, grad) # NOTE: better than solve(hess) %*% grad
+        
+        # early stop condition
+        if (max(abs(betas_new - betas)) < tol) {
+            if (verbose) {cat(sprintf("Converge at iter=%d", iter))}
+            return(betas_new)
+        }
+        
+        # update parameters
+        betas <- betas_new
+    }
+    cat("NR Algo did not converge")
+    return(betas)
+}
+
+
+# Main Parallel Function
+
+main <- function(datafile, NumberOfIterations, clusterSize) {
+    
+    # load data
+    data <- read.table(datafile, header = FALSE)
+    
+    # extract variables
+    response <- ncol(data)
+    lastPredictor <- ncol(data) - 1
+    
+    # cluster setups
+    cluster <- makeCluster(clusterSize, type="SOCK")
+    
+    clusterEvalQ(
+        cluster,
+        {library(MASS)}
+    ) # run expression on each cluster
+    
+    clusterExport(cluster, c(
+        "get_xy",
+        "log1pexp",
+        "post_loglik",
+        "get_post_gradient",
+        "get_post_hessian",
+        "get_betas_mode_NR",
+        "getLaplaceApprox",
+        "getPosteriorMeans",
+        "bayesLogistic"
+    )) # export helpers to each cluster
+    
+    
+    # Main estimation
+    results <- clusterApply(
+        cluster,
+        1:lastPredictor,
+        bayesLogistic,
+        response,
+        data,
+        NumberOfIterations
+    )
+    
+    #destroy the cluster
+    stopCluster(cluster);
+
+    return(results)
+}
+
+```
+
+
+```{r}
+res <- main("534binarydata.txt", 10000, 10)
+res_df <- rbindlist(res)
+res_df |> head()
+```
+
+
+## Part B: AI Solution
+
+### Prompt
+
+write a function bayesLogistic as follows:
+bayesLogistic <- function(apredictor, response, data, NumberOfIterations)
+where the inputs are:
+apredictor: integer - column index corresponding to an explanatory variable (note we are in an univariate model),
+response: integer - column index corresponding to the response variable,
+data: data frame or matrix - contains all the variables,
+NumberOfIterations:number of iterations for Metropolis-Hastings.
+Your function should return a list with the following elements as stated in the sample main function:
+apredictor:integer - index of predictor,
+logmarglik:real number - log marginal likelihood,
+beta0bayes:real number - beta0 estimate from posterior,
+beta1bayes:real number - beta1 estimate from posterior,
+beta0mle (optional):real number - beta0 MLE estimate,
+beta1mle (optional):real number - beta1 MLE estimate
+
+Also,  compose a main function following this parallel framework:
+
+```{r include=FALSE}
+# main <- function(datafile,NumberOfIterations,clusterSize)
+# {
+#  #read the data
+#  data = read.table(datafile,header=FALSE);
+# 
+#  #the sample size is 148 (number of rows)
+#  #the explanatory variables are the first 60 columns for '534binarydata.txt'
+#  #the last column is the binary response
+#  response = ncol(data);
+#  lastPredictor = ncol(data)-1;
+# 
+#  #initialize a cluster for parallel computing
+#  cluster <- makeCluster(clusterSize, type = "SOCK")
+# 
+#  #run the MC3 algorithm from several times
+#  results = clusterApply(cluster, 1:lastPredictor, bayesLogistic,
+#             response,data,NumberOfIterations);
+# 
+#  #print out the results
+#  for(i in 1:lastPredictor)
+#  {
+#   cat('Regression of Y on explanatory variable ',results[[i]]$apredictor,
+#     ' has log marginal likelihood ',results[[i]]$logmarglik,
+#     ' with beta0 = ',results[[i]]$beta0bayes,' (',results[[i]]$beta0mle,')',
+#     ' and beta1 = ',results[[i]]$beta1bayes,' (',results[[i]]$beta1mle,')',
+#     '\n'); 
+#  }
+# 
+#  #destroy the cluster
+#  stopCluster(cluster);
+# }
+# main  <- function(datafile,NumberOfIterations,clusterSize)
+```
+
+### Code
+
+
+```{r}
+# baye logistic
+AI_bayesLogistic <- function(apredictor, response, data, NumberOfIterations) {
+    # 1. Find the mode via Newton-Raphson
+    beta_mode <- getMode(response, apredictor, data)
+    
+    # 2. Compute Laplace Approximation (Log Marginal Likelihood) [cite: 89]
+    log_ml <- AI_getLaplaceApprox(response, apredictor, data, beta_mode)
+    
+    # 3. Compute Posterior Means via Metropolis-Hastings [cite: 90, 91]
+    post_means <- AI_getPosteriorMeans(response, apredictor, data, beta_mode, NumberOfIterations)
+    
+    # 4. Optional: Calculate MLEs using standard logistic regression
+    fit_mle <- glm(data[, response] ~ data[, apredictor], family = "binomial")
+    mles <- coef(fit_mle)
+    
+    # Return the results as a list [cite: 135, 136]
+    return(list(
+        apredictor = apredictor,
+        logmarglik = log_ml,
+        beta0bayes = post_means[1],
+        beta1bayes = post_means[2],
+        beta0mle = mles[1],
+        beta1mle = mles[2]
+    ))
+}
+
+
+# main
+library(snow) # Required for parallel computing [cite: 140]
+
+AI_main <- function(datafile, NumberOfIterations, clusterSize) {
+    data <- read.table(datafile, header = FALSE)
+    
+    response_idx <- ncol(data)
+    lastPredictor <- ncol(data) - 1
+    
+    cluster <- makeCluster(clusterSize, type = "SOCK")
+    
+    clusterExport(
+        cluster,
+        c("getMode", "AI_getLaplaceApprox", "AI_getPosteriorMeans", "AI_bayesLogistic")
+    )
+    
+    results <- clusterApply(
+        cluster,
+        1:lastPredictor,
+        AI_bayesLogistic,
+        response_idx,
+        data,
+        NumberOfIterations
+    )
+    
+    for (i in 1:lastPredictor) {
+        cat(
+            "Regression of Y on explanatory variable", results[[i]]$apredictor,
+            "has log marginal likelihood", results[[i]]$logmarglik,
+            "with beta0 =", results[[i]]$beta0bayes, "(", results[[i]]$beta0mle, ")",
+            "and beta1 =", results[[i]]$beta1bayes, "(", results[[i]]$beta1mle, ")",
+            "\n"
+        )
+    }
+    
+    stopCluster(cluster)
+    return(results)
+}
+
+# Helpers
+# Find the mode of the posterior using Newton-Raphson
+getMode <- function(response, explanatory, data) {
+    y <- data[, response]
+    x <- data[, explanatory]
+    beta <- c(0, 0) # Initial values (0,0) [cite: 44]
+    eps <- 0.0001
+    diff <- 1
+    
+    while(diff > eps) {
+        beta_old <- beta
+        lp <- beta[1] + beta[2] * x
+        pi_ <- exp(lp) / (1 + exp(lp)) # Inverse logit [cite: 21]
+        
+        # Gradient of l* [cite: 26, 37]
+        grad <- c(sum(y - pi_) - beta[1], sum(y * x - pi_ * x) - beta[2])
+        
+        # Hessian of l* [cite: 38, 39]
+        weight <- pi_ * (1 - pi_)
+        h00 <- -sum(weight) - 1
+        h01 <- -sum(x * weight)
+        h11 <- -sum(x^2 * weight) - 1
+        hessian <- matrix(c(h00, h01, h01, h11), nrow = 2)
+        
+        # Update step [cite: 46]
+        beta <- beta - solve(hessian) %*% grad
+        diff <- max(abs(beta - beta_old)) # Convergence check [cite: 47]
+    }
+    return(as.vector(beta))
+}
+```
+
+
+
+## Part C: Comparison
+
+```{r message=FALSE}
+AI_res <- AI_main("534binarydata.txt", 10000, 10)
+AI_res_df <- rbindlist(AI_res)
+```
+
+
+```{r}
+mean(abs(res_df - AI_res_df) < 0.01)
+abs(res_df - AI_res_df) |> max()
+```
+
+
+- The AI `bayesLogistic()` has the same high-level structure as my `bayesLogistic()`: find the posterior mode by Newton-Raphson, compute the Laplace log marginal likelihood, estimate posterior means by Metropolis-Hastings, fit a standard logistic regression with `glm()` for MLE, and return a list with the required fields.
+
+- The AI output is correct on this data set. The result data show most of the case (93% of the values) has difference less than 0.01, and the max abs. diff. is 0.03.
+
+- Similarly, my solution is better organized for a larger assignment because `bayesLogistic()` depends on reusable helper functions, and `main()` exports all needed helpers to the parallel workers. The AI version is understandable, but it places formulas directly in several functions, so changing the prior, likelihood, or numerical stabilization would require edits in multiple places.
+
+- The AI Newton-Raphson helper `getMode()` has no maximum iteration limit. It converges here, but my `get_betas_mode_NR()` includes `max_iter`, tolerance, and an optional verbose message, which is safer if the data or starting values are less well behaved.
+
+- Both `main()` functions use a list of per-predictor results returned from `clusterApply()`. Each result is a list containing the predictor index, log marginal likelihood, Bayesian beta estimates, and MLE beta estimates. The data structures and parallel algorithm are therefore very similar.
