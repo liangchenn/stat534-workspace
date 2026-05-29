@@ -67,6 +67,7 @@ int main()
     {
         for (j = i + 1; j < p; j++)
         {
+            // create non-duplicated index pair by only including {i, j > i}
             A[0] = i + 1;
             A[1] = j + 1;
 

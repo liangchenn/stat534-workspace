@@ -13,7 +13,7 @@ main.o: main.cpp matrices.h
 	gcc -g -c main.cpp -o main.o ${MATRICES_INCLUDE}
 
 matrices: main.o matrices.o
-	gcc main.o matrices.o -o matrices ${MATRICES_LIB} ${MATRICES_LSTDFLG}
+	gcc main.o matrices.o -o matrices ${MATRICES_LIB} ${MATRICES_LSTDFLG} && ./matrices
 
 clean:
 	rm -f *.o
