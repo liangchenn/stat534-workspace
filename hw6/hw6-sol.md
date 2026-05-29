@@ -343,7 +343,7 @@ void ai_addRegression(int nMaxRegs, LPAIRegression regressions, int lenA, int *A
 - Enumerates all one-predictor models.
 - Enumerates all two-predictor models with `i < j`, so there are no repeated pairs.
 - Uses `AddRegression` to keep only the best 10 models instead of storing all models.
-
+- The output is stored at `top-10-regression-model.txt`
 
 ```cpp
 // 0. constants
