@@ -1,0 +1,40 @@
+For Problem 1 create a function called makeCovariance as follows:
+
+void makeCovariance(gsl_matrix* covX, gsl_matrix* X)
+
+where,
+
+- covX is where you will store the sample covariance matrix (sigma)
+
+- X is your data matrix.
+
+Note that in the assignment there is a small typo, the correct function from gsl you should use is called gsl_stats_covariance NOT gsl_stat_covariance (such a function does not exist). Also, save the output into a “txt” file instead of directly printing it out directly.
+
+ 
+
+For Problem 2, first create a function called makeCholesky that gives the Cholesky decomposition of a matrix. The signature is as follows:
+
+gsl_matrix* makeCholesky(gsl_matrix* K)
+
+where
+
+- K is the matrix to decompose.
+
+ 
+
+Next, create a function called randomMVN that samples from a multivariate normal distribution using the Cholesky decomposition as described in the assignment. The declaration is as follows:
+
+void randomMVN(gsl_rng* mystream, gsl_matrix* samples, gsl_matrix* sigma)
+
+where,
+
+- mystream is the initialized GSL RNG object,
+
+- samples is the matrix where you store the samples,
+
+- sigma is the covariance matrix of the multivariate normal distribution
+
+ 
+
+For problem 3, your main function should print the sample covariance matrix of 10,000 random draws from the above multivariate normal distribution. Note that this MIGHT require you to change your randomMVN function to sample 10,000 times (if you only wrote it to sample once in Problem 2).
+
