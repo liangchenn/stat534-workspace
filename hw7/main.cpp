@@ -36,17 +36,18 @@ int main()
     // 0. setups
     const gsl_rng_type *T = gsl_rng_mt19937;
     gsl_rng *rng = gsl_rng_alloc(T);
-    gsl_rng_set(rng, 123); // seed
+    gsl_rng_set(rng, 5566); // seed
+
+    // --------------------------- problem3: 10000 random samples covariance ---------------------------
 
     // 1. draw random samples and save
     randomMVN(rng, samples, sigma);
     save_matrix(random_sample_output_file, samples);
 
-    // --------------------------- problem3: 10000 random samples ---------------------------
     makeCovariance(sample_cov, samples);
     save_matrix(random_sample_cov_output_file, sample_cov);
 
-    // --------------------------- release meme ---------------------------
+    // --------------------------- release mem ---------------------------
     gsl_rng_free(rng);
     gsl_matrix_free(data);
     gsl_matrix_free(sigma);

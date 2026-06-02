@@ -61,7 +61,16 @@ gsl_matrix *makeCholesky(gsl_matrix *K)
     gsl_matrix *chol = gsl_matrix_alloc(K->size1, K->size2);
     gsl_matrix_memcpy(chol, K);
 
-    gsl_linalg_cholesky_decomp(chol); // this modify the input in-place
+    gsl_linalg_cholesky_decomp(chol); // this modifies the input in-place
+    // based on the documentation, it will only modify the lower triangular part
+    // need to ignore the upper tri part when doing calculations afterwards.
+    for (size_t i = 0; i < chol->size1; i++)
+    {
+        for (size_t j = i + 1; j < chol->size2; j++)
+        {
+            gsl_matrix_set(chol, i, j, 0.0);
+        }
+    }
 
     return chol;
 }
@@ -86,9 +95,7 @@ void randomMVN(gsl_rng *mystream, gsl_matrix *samples, gsl_matrix *sigma)
 
     for (size_t i = 0; i < samples->size1; i++)
     {
-        // Z_{px1} ~ N(0, 1)
         draw_multivariate_standard_normal(mystream, Z);
-        // X = \psi * Z
         gsl_blas_dgemm(CblasNoTrans, CblasNoTrans, 1.0, chol, Z, 0.0, X);
 
         for (size_t j = 0; j < samples->size2; j++)
@@ -100,34 +107,6 @@ void randomMVN(gsl_rng *mystream, gsl_matrix *samples, gsl_matrix *sigma)
     gsl_matrix_free(chol);
     gsl_matrix_free(Z);
     gsl_matrix_free(X);
-}
-
-int simulate_draws(gsl_matrix *chol, gsl_rng *rng, gsl_matrix *draws)
-{
-    size_t p = chol->size1;
-    gsl_matrix *z = gsl_matrix_alloc(p, 1);
-    gsl_matrix *x = gsl_matrix_alloc(p, 1);
-
-    if (z == NULL || x == NULL)
-    {
-        fprintf(stderr, "Error: failed to allocate temporary draw matrices.\n");
-        gsl_matrix_free(z);
-        gsl_matrix_free(x);
-        return 1;
-    }
-
-    for (size_t i = 0; i < draws->size1; i++)
-    {
-        draw_multivariate_normal(chol, rng, z, x);
-        for (size_t j = 0; j < draws->size2; j++)
-        {
-            gsl_matrix_set(draws, i, j, gsl_matrix_get(x, j, 0));
-        }
-    }
-
-    gsl_matrix_free(z);
-    gsl_matrix_free(x);
-    return 0;
 }
 
 int save_matrix(char *filename, gsl_matrix *matrix)
