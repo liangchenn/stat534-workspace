@@ -13,7 +13,7 @@ int main()
     const int num_draws = 10000;
 
     char datafilename[] = "erdata.txt";
-    char sigma_output_file[] = "sigma.txt";
+    char sigma_output_file[] = "covariance.txt";
     char random_sample_output_file[] = "random-sample.txt";
     char random_sample_cov_output_file[] = "random-sample-covariance.txt";
 
