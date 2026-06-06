@@ -51,7 +51,7 @@ int main()
 {
     const int p = 51;
 
-    char sigma_file[] = "sigma.txt";
+    char sigma_file[] = "covariance.txt";
     char sample_cov_file[] = "random-sample-covariance.txt";
     char abs_diff_file[] = "absolute-difference.txt";
 
